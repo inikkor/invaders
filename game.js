@@ -2,6 +2,7 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const scoreElement = document.getElementById('score');
 const livesElement = document.getElementById('lives');
+const levelElement = document.getElementById('level');
 const gameOverScreen = document.getElementById('game-over');
 const finalScoreElement = document.getElementById('final-score');
 const restartBtn = document.getElementById('restart-btn');
@@ -20,15 +21,73 @@ const ALIEN_PADDING = 15;
 const ALIEN_OFFSET_TOP = 60;
 const ALIEN_OFFSET_LEFT = 60;
 
-const alienShape = [
-    [0, 1, 0, 0, 0, 0, 0, 1, 0],
-    [0, 0, 1, 0, 0, 0, 1, 0, 0],
-    [0, 1, 1, 1, 1, 1, 1, 1, 0],
-    [1, 1, 0, 1, 1, 1, 0, 1, 1],
-    [1, 1, 1, 1, 1, 1, 1, 1, 1],
-    [1, 0, 1, 1, 1, 1, 1, 0, 1],
-    [1, 0, 1, 0, 0, 0, 1, 0, 1],
-    [0, 0, 0, 1, 1, 1, 0, 0, 0],
+const ALIEN_SHAPES = [
+    [ // Squid (Top row)
+        [
+            [0,0,0,1,1,0,0,0],
+            [0,0,1,1,1,1,0,0],
+            [0,1,1,1,1,1,1,0],
+            [1,1,0,1,1,0,1,1],
+            [1,1,1,1,1,1,1,1],
+            [0,0,1,0,0,1,0,0],
+            [0,1,0,1,1,0,1,0],
+            [1,0,1,0,0,1,0,1]
+        ],
+        [
+            [0,0,0,1,1,0,0,0],
+            [0,0,1,1,1,1,0,0],
+            [0,1,1,1,1,1,1,0],
+            [1,1,0,1,1,0,1,1],
+            [1,1,1,1,1,1,1,1],
+            [0,1,0,1,1,0,1,0],
+            [1,0,0,0,0,0,0,1],
+            [0,1,0,0,0,0,1,0]
+        ]
+    ],
+    [ // Crab (Middle rows)
+        [
+            [0,0,1,0,0,0,1,0,0],
+            [0,0,0,1,0,1,0,0,0],
+            [0,0,1,1,1,1,1,0,0],
+            [0,1,1,0,1,0,1,1,0],
+            [1,1,1,1,1,1,1,1,1],
+            [1,0,1,1,1,1,1,0,1],
+            [1,0,1,0,0,0,1,0,1],
+            [0,0,0,1,1,1,0,0,0]
+        ],
+        [
+            [0,0,1,0,0,0,1,0,0],
+            [1,0,0,1,0,1,0,0,1],
+            [1,0,1,1,1,1,1,0,1],
+            [1,1,1,0,1,0,1,1,1],
+            [0,1,1,1,1,1,1,1,0],
+            [0,0,1,1,1,1,1,0,0],
+            [0,1,0,0,0,0,0,1,0],
+            [1,0,0,0,0,0,0,0,1]
+        ]
+    ],
+    [ // Octopus (Bottom rows)
+        [
+            [0,0,0,1,1,1,1,0,0,0],
+            [0,1,1,1,1,1,1,1,1,0],
+            [1,1,1,1,1,1,1,1,1,1],
+            [1,1,1,0,0,0,0,1,1,1],
+            [1,1,1,1,1,1,1,1,1,1],
+            [0,0,1,1,0,0,1,1,0,0],
+            [0,1,1,0,1,1,0,1,1,0],
+            [1,1,0,0,0,0,0,0,1,1]
+        ],
+        [
+            [0,0,0,1,1,1,1,0,0,0],
+            [0,1,1,1,1,1,1,1,1,0],
+            [1,1,1,1,1,1,1,1,1,1],
+            [1,1,1,0,0,0,0,1,1,1],
+            [1,1,1,1,1,1,1,1,1,1],
+            [0,0,0,1,1,1,1,0,0,0],
+            [0,0,1,1,0,0,1,1,0,0],
+            [1,1,0,0,0,0,0,0,1,1]
+        ]
+    ]
 ];
 
 // Sound Manager using Web Audio API
@@ -96,17 +155,22 @@ function playSound(type, frequency = null) {
 }
 
 // Game state
+let gameStarted = false;
 let score = 0;
 let lives = 3;
+let level = 1;
 let gameRunning = true;
 let enemies = [];
 let bullets = [];
 let particles = [];
 let enemyDirection = 1;
-let formationXOffset = 0; // New: Offset for the entire alien formation X position
-let formationYOffset = 0; // New: Offset for the entire alien formation Y position
+let formationXOffset = 0;
+let formationYOffset = 0;
+let enemyMoveTimer = 0;
+let alienFrame = 0;
+let thumpCount = 0;
 let shakeTime = 0;
-let nextThumpTime = 0; // Initialize nextThumpTime
+let nextThumpTime = 0;
 
 let ufo = { // Define ufo object
     x: -100, // Off-screen initially
@@ -123,7 +187,7 @@ let player = {
     y: canvas.height - 50,
     width: PLAYER_WIDTH,
     height: PLAYER_HEIGHT,
-    speed: 0.8, // Acceleration
+    speed: 1.5,
     friction: 0.9,
     vx: 0,
     color: '#00FF00'
@@ -154,30 +218,37 @@ function init() {
     bullets = [];
     particles = [];
     enemyDirection = 1;
-    formationXOffset = 0; // Reset formation offset
-    formationYOffset = 0; // Reset formation offset
+    formationXOffset = (canvas.width - (ALIEN_COLS * (ALIEN_WIDTH + ALIEN_PADDING) - ALIEN_PADDING)) / 2 - ALIEN_OFFSET_LEFT; 
+    formationYOffset = 0;
+    enemyMoveTimer = 0;
+    alienFrame = 0;
+    thumpCount = 0;
     shakeTime = 0;
     nextThumpTime = 0;
     
     // Reset UFO state
     ufo.active = false;
-    ufo.x = -ufo.width; // Start off-screen left
-    ufo.direction = 1; // Default direction
+    ufo.x = -ufo.width;
+    ufo.direction = 1;
     
     scoreElement.innerText = `Score: ${score}`;
     livesElement.innerText = `Lives: ${lives}`;
     gameOverScreen.classList.add('hidden');
     
     for (let row = 0; row < ALIEN_ROWS; row++) {
+        let shapeIndex = 2; // Octopus for bottom rows
+        if (row === 0) shapeIndex = 0; // Squid for top row
+        else if (row === 1 || row === 2) shapeIndex = 1; // Crab for middle rows
+
         for (let col = 0; col < ALIEN_COLS; col++) {
             enemies.push({
-                initialX: col * (ALIEN_WIDTH + ALIEN_PADDING) + ALIEN_OFFSET_LEFT, // Store initial relative X
-                initialY: row * (ALIEN_HEIGHT + ALIEN_PADDING) + ALIEN_OFFSET_TOP, // Store initial relative Y
+                initialX: col * (ALIEN_WIDTH + ALIEN_PADDING) + ALIEN_OFFSET_LEFT,
+                initialY: row * (ALIEN_HEIGHT + ALIEN_PADDING) + ALIEN_OFFSET_TOP,
                 width: ALIEN_WIDTH,
                 height: ALIEN_HEIGHT,
                 points: (ALIEN_ROWS - row) * 10,
-                color: row % 2 === 0 ? '#FF0000' : '#FFFF00',
-                shape: alienShape
+                color: row === 0 ? '#FF00FF' : (row < 3 ? '#00FFFF' : '#FFFF00'),
+                shape: ALIEN_SHAPES[shapeIndex]
             });
         }
     }
@@ -218,7 +289,7 @@ function gameOver() {
 }
 
 function update() {
-    if (!gameRunning) return;
+    if (!gameStarted || !gameRunning) return;
 
     // Update stars
     stars.forEach(star => {
@@ -240,10 +311,10 @@ function update() {
 
     // Player movement
     if (keys['ArrowLeft'] && player.x > 0) {
-        player.vx -= player.accel;
+        player.vx -= player.speed;
     }
     if (keys['ArrowRight'] && player.x < canvas.width - player.width) {
-        player.vx += player.accel;
+        player.vx += player.speed;
     }
     player.vx *= player.friction;
     player.x += player.vx;
@@ -257,50 +328,59 @@ function update() {
     });
 
     // Update enemies
-    let currentSpeed = 0.8 + (1 - (enemies.length / (ALIEN_ROWS * ALIEN_COLS))) * 1.5;
+    enemyMoveTimer++;
+    // Interval decreases as enemies are destroyed. 
+    // Classic feel: move once every (enemy count) frames, capped between 2 and 60.
+    const moveInterval = Math.max(2, Math.floor(enemies.length * 1.8));
 
-    // Calculate current bounds of the alien formation using offsets
-    let minInitialX = Infinity;
-    let maxInitialX = -Infinity;
-    let lowestEnemyActualY = -Infinity; // To check game over
+    if (enemyMoveTimer >= moveInterval) {
+        enemyMoveTimer = 0;
 
-    enemies.forEach(enemy => {
-        minInitialX = Math.min(minInitialX, enemy.initialX);
-        maxInitialX = Math.max(maxInitialX, enemy.initialX + enemy.width);
-        lowestEnemyActualY = Math.max(lowestEnemyActualY, enemy.initialY + formationYOffset + enemy.height);
-    });
+        // Calculate current bounds of the alien formation
+        let minInitialX = Infinity;
+        let maxInitialX = -Infinity;
 
-    let formationActualMinX = minInitialX + formationXOffset;
-    let formationActualMaxX = maxInitialX + formationXOffset;
-
-    let moveDownThisFrame = false;
-
-    // Check if the formation is about to hit an edge
-    if (enemyDirection === 1 && (formationActualMaxX + (currentSpeed)) >= canvas.width - 20) {
-        moveDownThisFrame = true;
-        // Adjust formationXOffset to precisely touch the edge, then reverse
-        formationXOffset = (canvas.width - 20) - maxInitialX;
-    } else if (enemyDirection === -1 && (formationActualMinX - (currentSpeed)) <= 20) {
-        moveDownThisFrame = true;
-        // Adjust formationXOffset to precisely touch the edge, then reverse
-        formationXOffset = 20 - minInitialX;
-    }
-
-    if (moveDownThisFrame) {
-        enemyDirection *= -1; // Reverse direction
-        formationYOffset += ALIEN_HEIGHT / 2; // Move down
-        
-        // Check if aliens reached player line (using the lowest actual Y)
-        let newLowestEnemyActualY = -Infinity;
         enemies.forEach(enemy => {
-            newLowestEnemyActualY = Math.max(newLowestEnemyActualY, enemy.initialY + formationYOffset + enemy.height);
+            minInitialX = Math.min(minInitialX, enemy.initialX);
+            maxInitialX = Math.max(maxInitialX, enemy.initialX + enemy.width);
         });
-        if (newLowestEnemyActualY >= player.y) {
-            gameOver();
+
+        const formationActualMinX = minInitialX + formationXOffset;
+        const formationActualMaxX = maxInitialX + formationXOffset;
+        const MOVE_STEP = 12;
+
+        let moveDownThisFrame = false;
+
+        // Check if the formation is about to hit an edge
+        if (enemyDirection === 1 && (formationActualMaxX + MOVE_STEP) >= canvas.width - 10) {
+            moveDownThisFrame = true;
+        } else if (enemyDirection === -1 && (formationActualMinX - MOVE_STEP) <= 10) {
+            moveDownThisFrame = true;
         }
-    } else {
-        // Move enemies horizontally (by updating the formation offset)
-        formationXOffset += currentSpeed * enemyDirection;
+
+        if (moveDownThisFrame) {
+            formationYOffset += ALIEN_HEIGHT * 0.75; // Move down
+            enemyDirection *= -1; // Reverse direction
+            
+            // Re-calculate bounds to check for game over immediately
+            let lowestEnemyActualY = -Infinity;
+            enemies.forEach(enemy => {
+                lowestEnemyActualY = Math.max(lowestEnemyActualY, enemy.initialY + formationYOffset + enemy.height);
+            });
+            if (lowestEnemyActualY >= player.y) {
+                gameOver();
+            }
+        } else {
+            // Move enemies horizontally
+            formationXOffset += MOVE_STEP * enemyDirection;
+        }
+
+        // Animation and sound
+        alienFrame = (alienFrame + 1) % 2;
+        
+        const frequencies = [100, 90, 80, 70]; // Thump-thump-thump-thump
+        playSound('thump', frequencies[thumpCount % 4]);
+        thumpCount++;
     }
 
     // Collision detection
@@ -386,25 +466,6 @@ function update() {
                 }
             });
         }
-        
-        if (currentTime >= nextThumpTime) {
-            let minY = Infinity;
-            enemies.forEach(e => {
-                if (e.y < minY) minY = e.y;
-            });
-            
-            if (enemies.length > 0) {
-                // Adjust frequency based on how close aliens are to player
-                let progress = (minY - ALIEN_OFFSET_TOP) / (player.y - ALIEN_OFFSET_TOP - ALIEN_HEIGHT);
-                progress = Math.max(0, Math.min(1, progress)); // Clamp between 0 and 1
-                let frequency = 60 + progress * 240; // Frequency increases as aliens get closer
-                
-                playSound('thump', frequency);
-            }
-            // Make thump interval decrease as enemies get closer
-            let thumpInterval = 0.5 - (1 - (enemies.length / (ALIEN_ROWS * ALIEN_COLS))) * 0.4;
-            nextThumpTime = currentTime + Math.max(0.1, thumpInterval);
-        }
     }
 }
 
@@ -412,6 +473,29 @@ function draw() {
     // Clear canvas
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    if (!gameStarted) {
+        ctx.fillStyle = '#00FF00';
+        ctx.font = '30px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText('SPACE INVADERS', canvas.width / 2, canvas.height / 2 - 50);
+        ctx.font = '20px Courier New';
+        ctx.fillText('PRESS SPACE OR CLICK TO START', canvas.width / 2, canvas.height / 2 + 20);
+        
+        // Draw some decorative aliens
+        const demoShapes = ALIEN_SHAPES[1][0];
+        const pixelSize = 4;
+        const startX = canvas.width / 2 - (demoShapes[0].length * pixelSize) / 2;
+        const startY = canvas.height / 2 - 150;
+        for (let r = 0; r < demoShapes.length; r++) {
+            for (let c = 0; c < demoShapes[r].length; c++) {
+                if (demoShapes[r][c] === 1) {
+                    ctx.fillRect(startX + c * pixelSize, startY + r * pixelSize, pixelSize, pixelSize);
+                }
+            }
+        }
+        return;
+    }
 
     // Draw stars
     ctx.fillStyle = '#FFF';
@@ -453,15 +537,16 @@ function draw() {
     // Draw enemies
     enemies.forEach(enemy => {
         ctx.fillStyle = enemy.color;
-        const pixelSize = enemy.width / alienShape[0].length;
+        const currentShape = enemy.shape[alienFrame];
+        const pixelSize = enemy.width / currentShape[0].length;
         
         // Calculate actual drawing position using formation offsets
         const actualX = enemy.initialX + formationXOffset;
         const actualY = enemy.initialY + formationYOffset;
         
-        for (let row = 0; row < alienShape.length; row++) {
-            for (let col = 0; col < alienShape[row].length; col++) {
-                if (alienShape[row][col] === 1) {
+        for (let row = 0; row < currentShape.length; row++) {
+            for (let col = 0; col < currentShape[row].length; col++) {
+                if (currentShape[row][col] === 1) {
                     ctx.fillRect(
                         actualX + col * pixelSize,
                         actualY + row * pixelSize,
@@ -491,27 +576,39 @@ function draw() {
     }
 
     ctx.restore();
-
-    // Main game loop
-    requestAnimationFrame(gameLoop);
 }
 
 function gameLoop() {
     update();
     draw();
-    if (gameRunning) {
-        requestAnimationFrame(gameLoop);
+    requestAnimationFrame(gameLoop);
+}
+
+function startGame() {
+    if (!gameStarted) {
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+        gameStarted = true;
+        init();
     }
 }
+
+window.addEventListener('mousedown', startGame);
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' || e.code === 'Enter') {
+        startGame();
+    }
+});
 
 restartBtn.addEventListener('click', () => {
     if (audioCtx.state === 'suspended') {
         audioCtx.resume();
     }
+    gameStarted = true;
     init();
-    gameLoop(); // Start the game loop again after restart
 });
 
 init();
-gameLoop(); // Initial call to start the game loop
+gameLoop(); 
 
